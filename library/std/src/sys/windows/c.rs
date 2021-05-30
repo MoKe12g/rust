@@ -984,7 +984,6 @@ extern "system" {
     pub fn GetModuleHandleA(lpModuleName: LPCSTR) -> HMODULE;
     pub fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE;
 
-    pub fn GetSystemTimeAsFileTime(lpSystemTimeAsFileTime: LPFILETIME);
     pub fn GetSystemInfo(lpSystemInfo: LPSYSTEM_INFO);
 
     pub fn CreateEventW(
@@ -1326,6 +1325,16 @@ compat_fn! {
     pub fn GetProcessId(handle: HANDLE) -> DWORD {
         rtabort!("unavailable")
     }
+
+    // >= 95 / NT 3.5
+    // https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemtimeasfiletime
+    pub fn GetSystemTimeAsFileTime(lpSystemTimeAsFileTime: LPFILETIME) -> () {
+        // implementation based on old MSDN docs
+        let mut st: SYSTEMTIME = crate::mem::zeroed();
+        GetSystemTime(&mut st);
+        crate::sys::cvt(SystemTimeToFileTime(&st, lpSystemTimeAsFileTime)).unwrap();
+    }
+
 }
 
 #[link(name = "kernel32")]
@@ -1348,4 +1357,21 @@ extern "system" {
     ) -> HANDLE;
 
     pub fn PulseEvent(hEvent: HANDLE) -> BOOL;
+
+    pub fn GetSystemTime(lpSystemTime: LPSYSTEMTIME);
+    pub fn SystemTimeToFileTime(lpSystemTime: *const SYSTEMTIME, lpFileTime: LPFILETIME) -> BOOL;
 }
+
+#[repr(C)]
+pub struct SYSTEMTIME {
+    wYear: WORD,
+    wMonth: WORD,
+    wDayOfWeek: WORD,
+    wDay: WORD,
+    wHour: WORD,
+    wMinute: WORD,
+    wSecond: WORD,
+    wMilliseconds: WORD,
+}
+
+pub type LPSYSTEMTIME = *mut SYSTEMTIME;
