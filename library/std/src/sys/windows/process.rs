@@ -335,7 +335,10 @@ impl Command {
         unsafe {
             drop(Handle::from_raw_handle(pi.hThread));
 
-            Ok((Process { handle: Handle::from_raw_handle(pi.hProcess) }, pipes))
+            Ok((
+                Process { handle: Handle::from_raw_handle(pi.hProcess), id: pi.dwProcessId },
+                pipes,
+            ))
         }
     }
 }
@@ -573,6 +576,7 @@ impl From<File> for Stdio {
 /// for the process to terminate.
 pub struct Process {
     handle: Handle,
+    id: u32,
 }
 
 impl Process {
@@ -582,7 +586,25 @@ impl Process {
     }
 
     pub fn id(&self) -> u32 {
-        unsafe { c::GetProcessId(self.handle.as_raw_handle()) as u32 }
+        if c::GetProcessId::available() {
+            unsafe { c::GetProcessId(self.handle.as_raw_handle()) as u32 }
+        } else {
+            // Query whether the process has exited by waiting with a timeout of 0 (= non-blocking).
+            // If `WAIT_TIMEOUT` is returned, the process has not exited, so our saved process id is
+            // still valid (MSDN: "The value is valid from the time the process is created until the
+            // time the process is terminated."). If the process has exited, the wait will succeed
+            // and return `WAIT_OBJECT_0`, in which case the id is no longer valid, and we return 0,
+            // just like `GetProcessId`.
+            let res = unsafe { c::WaitForSingleObject(self.handle.as_raw_handle(), 0) };
+
+            match res {
+                c::WAIT_TIMEOUT => self.id,
+                c::WAIT_OBJECT_0 | _ => {
+                    // process is exited, there is no valid id associated anymore
+                    0
+                }
+            }
+        }
     }
 
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
