@@ -959,12 +959,7 @@ extern "system" {
     pub fn CloseHandle(hObject: HANDLE) -> BOOL;
     pub fn MoveFileExW(lpExistingFileName: LPCWSTR, lpNewFileName: LPCWSTR, dwFlags: DWORD)
     -> BOOL;
-    pub fn SetFilePointerEx(
-        hFile: HANDLE,
-        liDistanceToMove: LARGE_INTEGER,
-        lpNewFilePointer: PLARGE_INTEGER,
-        dwMoveMethod: DWORD,
-    ) -> BOOL;
+
     pub fn FlushFileBuffers(hFile: HANDLE) -> BOOL;
     pub fn CreateFileW(
         lpFileName: LPCWSTR,
@@ -1029,12 +1024,6 @@ extern "system" {
     pub fn GetFileInformationByHandleEx(
         hFile: HANDLE,
         fileInfoClass: FILE_INFO_BY_HANDLE_CLASS,
-        lpFileInformation: LPVOID,
-        dwBufferSize: DWORD,
-    ) -> BOOL;
-    pub fn SetFileInformationByHandle(
-        hFile: HANDLE,
-        FileInformationClass: FILE_INFO_BY_HANDLE_CLASS,
         lpFileInformation: LPVOID,
         dwBufferSize: DWORD,
     ) -> BOOL;
@@ -1335,6 +1324,43 @@ compat_fn! {
         crate::sys::cvt(SystemTimeToFileTime(&st, lpSystemTimeAsFileTime)).unwrap();
     }
 
+    // >= 2000
+    // https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfilepointerex
+    pub fn SetFilePointerEx(
+        hFile: HANDLE,
+        liDistanceToMove: LARGE_INTEGER,
+        lpNewFilePointer: PLARGE_INTEGER,
+        dwMoveMethod: DWORD
+    ) -> BOOL {
+        let lDistanceToMove = liDistanceToMove as LONG;
+        let mut distance_to_move_high = (liDistanceToMove >> 32) as LONG;
+
+        let newPos_low = SetFilePointer(hFile, lDistanceToMove, &mut distance_to_move_high, dwMoveMethod);
+
+        // since (-1 as u32) could be a valid value for the lower 32 bits of the new file pointer
+        // position, a call to GetLastError is needed to actually see if it failed
+        if newPos_low == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR {
+            return FALSE;
+        }
+
+        if !lpNewFilePointer.is_null() {
+            *lpNewFilePointer = (distance_to_move_high as LARGE_INTEGER) << 32 | (newPos_low as LARGE_INTEGER);
+        }
+
+        TRUE
+    }
+
+    // >= Vista / Server 2008 (XP / Server 2003 when linking a supported FileExtd.lib)
+    // https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle
+    pub fn SetFileInformationByHandle(
+        hFile: HANDLE,
+        FileInformationClass: FILE_INFO_BY_HANDLE_CLASS,
+        lpFileInformation: LPVOID,
+        dwBufferSize: DWORD
+    ) -> BOOL {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
+        FALSE
+    }
 }
 
 #[link(name = "kernel32")]
@@ -1360,6 +1386,15 @@ extern "system" {
 
     pub fn GetSystemTime(lpSystemTime: LPSYSTEMTIME);
     pub fn SystemTimeToFileTime(lpSystemTime: *const SYSTEMTIME, lpFileTime: LPFILETIME) -> BOOL;
+
+    pub fn SetEndOfFile(hFile: HANDLE) -> BOOL;
+
+    pub fn SetFilePointer(
+        hFile: HANDLE,
+        lDistanceToMove: LONG,
+        lpDistanceToMoveHigh: *mut LONG,
+        dwMoveMethod: DWORD,
+    ) -> DWORD;
 }
 
 #[repr(C)]
@@ -1375,3 +1410,6 @@ pub struct SYSTEMTIME {
 }
 
 pub type LPSYSTEMTIME = *mut SYSTEMTIME;
+
+pub const INVALID_SET_FILE_POINTER: DWORD = 0xFFFFFFFF;
+pub const NO_ERROR: DWORD = 0;
