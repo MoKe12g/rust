@@ -30,13 +30,17 @@ impl Thread {
         // PTHREAD_STACK_MIN bytes big.  Windows has no such lower limit, it's
         // just that below a certain threshold you can't do anything useful.
         // That threshold is application and architecture-specific, however.
+
+        // this is needed on 9X/ME - passing null_mut() is not allowed
+        let mut thread_id = 0;
+
         let ret = c::CreateThread(
             ptr::null_mut(),
             stack,
             thread_start,
             p as *mut _,
             c::STACK_SIZE_PARAM_IS_A_RESERVATION,
-            ptr::null_mut(),
+            &mut thread_id,
         );
 
         return if let Ok(handle) = ret.try_into() {
