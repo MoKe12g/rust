@@ -951,16 +951,9 @@ extern "system" {
 
     pub fn GetProcAddress(handle: HMODULE, name: LPCSTR) -> *mut c_void;
     pub fn GetModuleHandleA(lpModuleName: LPCSTR) -> HMODULE;
-    pub fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE;
 
     pub fn GetSystemInfo(lpSystemInfo: LPSYSTEM_INFO);
 
-    pub fn CreateEventW(
-        lpEventAttributes: LPSECURITY_ATTRIBUTES,
-        bManualReset: BOOL,
-        bInitialState: BOOL,
-        lpName: LPCWSTR,
-    ) -> HANDLE;
     pub fn WaitForMultipleObjects(
         nCount: DWORD,
         lpHandles: *const HANDLE,
