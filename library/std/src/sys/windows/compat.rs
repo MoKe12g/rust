@@ -49,6 +49,11 @@
 //! * call any Rust function or CRT function that touches any static
 //!   (global) state.
 
+use crate::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use crate::sys::c;
+
+pub(crate) const UNICOWS_MODULE_NAME: &str = "unicows\0";
+
 macro_rules! compat_fn {
     ($module:literal: $(
         $(#[$meta:meta])*
@@ -67,7 +72,8 @@ macro_rules! compat_fn {
             /// This static can be an ordinary, unsynchronized, mutable static because
             /// we guarantee that all of the writes finish during CRT initialization,
             /// and all of the reads occur after CRT initialization.
-            static mut PTR: Option<F> = None;
+            static mut PTR: F = fallback;
+            static mut AVAILABLE: bool = false;
 
             /// This symbol is what allows the CRT to find the `init` function and call it.
             /// It is marked `#[used]` because otherwise Rust would assume that it was not
@@ -84,14 +90,32 @@ macro_rules! compat_fn {
                 // any Rust functions or CRT functions, if those functions touch any global state,
                 // because this function runs during global initialization. For example, DO NOT
                 // do any dynamic allocation, don't call LoadLibrary, etc.
+
+                let symbol_name: *const u8 = concat!(stringify!($symbol), "\0").as_ptr();
+
+                let unicows_handle = $crate::sys::c::GetModuleHandleA(
+                    $crate::sys::compat::UNICOWS_MODULE_NAME.as_ptr() as *const i8
+                );
+                if !unicows_handle.is_null() {
+                    match $crate::sys::c::GetProcAddress(unicows_handle, symbol_name as *const i8) as usize {
+                        0 => {}
+                        n => {
+                            PTR = mem::transmute::<usize, F>(n);
+                            AVAILABLE = true;
+                            return;
+                        }
+                    }
+                }
+
                 let module_name: *const u8 = concat!($module, "\0").as_ptr();
                 let symbol_name: *const u8 = concat!(stringify!($symbol), "\0").as_ptr();
                 let module_handle = $crate::sys::c::GetModuleHandleA(module_name as *const i8);
                 if !module_handle.is_null() {
-                    match $crate::sys::c::GetProcAddress(module_handle, symbol_name as *const i8).addr() {
+                    match $crate::sys::c::GetProcAddress(module_handle, symbol_name as *const i8) as usize {
                         0 => {}
                         n => {
-                            PTR = Some(mem::transmute::<usize, F>(n));
+                            PTR = mem::transmute::<usize, F>(n);
+                            AVAILABLE = true;
                         }
                     }
                 }
@@ -99,20 +123,169 @@ macro_rules! compat_fn {
 
             #[allow(dead_code)]
             pub fn option() -> Option<F> {
-                unsafe { PTR }
+                unsafe {
+                    if AVAILABLE {
+                        Some(PTR)
+                    } else {
+                        None
+                    }
+                }
             }
 
             #[allow(dead_code)]
+            #[inline(always)]
+            pub fn available() -> bool {
+                unsafe { AVAILABLE }
+            }
+
+            #[allow(dead_code)]
+            #[inline(always)]
             pub unsafe fn call($($argname: $argtype),*) -> $rettype {
-                if let Some(ptr) = PTR {
-                    ptr($($argname),*)
-                } else {
-                    $fallback_body
-                }
+                PTR($($argname),*)
+            }
+
+            #[allow(dead_code)]
+            unsafe extern "system" fn fallback(
+                $(#[allow(unused_variables)] $argname: $argtype),*
+            ) -> $rettype {
+                $fallback_body
             }
         }
 
         $(#[$meta])*
         pub use $symbol::call as $symbol;
     )*)
+}
+
+macro_rules! compat_fn_lazy {
+    ($module:literal:{unicows: $unicows:literal, load: $load:literal}: $(
+        $(#[$meta:meta])*
+        pub fn $symbol:ident($($argname:ident: $argtype:ty),*) -> $rettype:ty $fallback_body:block
+    )*) => ($(
+        $(#[$meta])*
+        pub mod $symbol {
+            #[allow(unused_imports)]
+            use super::*;
+            use crate::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
+            use crate::mem;
+
+            type F = unsafe extern "system" fn($($argtype),*) -> $rettype;
+
+            static PTR: AtomicUsize = AtomicUsize::new(0);
+            static AVAILABLE: AtomicBool = AtomicBool::new(false);
+
+            #[allow(dead_code)]
+            fn load() -> usize {
+                unsafe {
+                    crate::sys::compat::store_func(
+                        &PTR,
+                        &AVAILABLE,
+                        concat!($module, "\0").as_ptr(),
+                        concat!(stringify!($symbol), "\0").as_ptr(),
+                        fallback as usize,
+                        $unicows,
+                        $load
+                    )
+                }
+            }
+
+            #[allow(dead_code)]
+            pub fn option() -> Option<F> {
+                let addr = match PTR.load(Ordering::SeqCst) {
+                    0 => load(),
+                    n => n,
+                };
+
+                unsafe {
+                    if AVAILABLE.load(Ordering::SeqCst) {
+                        Some(mem::transmute::<usize, F>(addr))
+                    } else {
+                        None
+                    }
+                }
+            }
+
+            #[allow(dead_code)]
+            pub fn available() -> bool {
+                if PTR.load(Ordering::SeqCst) == 0 {
+                    load();
+                }
+                AVAILABLE.load(Ordering::SeqCst)
+            }
+
+            #[allow(dead_code)]
+            pub unsafe fn call($($argname: $argtype),*) -> $rettype {
+                let addr = match PTR.load(Ordering::SeqCst) {
+                    0 => load(),
+                    n => n,
+                };
+                mem::transmute::<usize, F>(addr)($($argname),*)
+            }
+
+            #[allow(dead_code)]
+            unsafe extern "system" fn fallback(
+                $(#[allow(unused_variables)] $argname: $argtype),*
+            ) -> $rettype {
+                $fallback_body
+            }
+        }
+
+        $(#[$meta])*
+        pub use $symbol::call as $symbol;
+    )*)
+}
+
+unsafe fn lookup(
+    module: *const u8,
+    symbol: *const u8,
+    check_unicows: bool,
+    load_library: bool,
+) -> Option<usize> {
+    if check_unicows {
+        let unicows_handle = c::GetModuleHandleA(UNICOWS_MODULE_NAME.as_ptr() as *const i8);
+        if !unicows_handle.is_null() {
+            match c::GetProcAddress(unicows_handle, symbol as *const i8) as usize {
+                0 => {}
+                n => {
+                    return Some(n);
+                }
+            }
+        }
+    }
+
+    let handle = if load_library {
+        c::LoadLibraryA(module as *const i8)
+    } else {
+        c::GetModuleHandleA(module as *const i8)
+    };
+
+    if handle.is_null() {
+        return None;
+    }
+
+    match c::GetProcAddress(handle, symbol as *const i8) as usize {
+        0 => None,
+        n => Some(n),
+    }
+}
+
+pub unsafe fn store_func(
+    ptr: &AtomicUsize,
+    available: &AtomicBool,
+    module: *const u8,
+    symbol: *const u8,
+    fallback: usize,
+    check_unicows: bool,
+    load_library: bool,
+) -> usize {
+    let value = match lookup(module, symbol, check_unicows, load_library) {
+        Some(value) => {
+            available.store(true, Ordering::SeqCst);
+            value
+        }
+        None => fallback,
+    };
+
+    ptr.store(value, Ordering::SeqCst);
+    value
 }

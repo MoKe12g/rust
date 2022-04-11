@@ -1277,3 +1277,8 @@ compat_fn! {
         panic!("keyed events not available")
     }
 }
+
+#[link(name = "kernel32")]
+extern "system" {
+    pub fn LoadLibraryA(lpFileName: LPCSTR) -> HMODULE;
+}
