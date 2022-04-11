@@ -820,16 +820,11 @@ if #[cfg(not(target_vendor = "uwp"))] {
             lpFileInformation: LPBY_HANDLE_FILE_INFORMATION,
         ) -> BOOL;
         pub fn SetHandleInformation(hObject: HANDLE, dwMask: DWORD, dwFlags: DWORD) -> BOOL;
-        pub fn AddVectoredExceptionHandler(
-            FirstHandler: ULONG,
-            VectoredHandler: PVECTORED_EXCEPTION_HANDLER,
-        ) -> LPVOID;
         pub fn CreateHardLinkW(
             lpSymlinkFileName: LPCWSTR,
             lpTargetFileName: LPCWSTR,
             lpSecurityAttributes: LPSECURITY_ATTRIBUTES,
         ) -> BOOL;
-        pub fn SetThreadStackGuarantee(_size: *mut c_ulong) -> BOOL;
         pub fn GetWindowsDirectoryW(lpBuffer: LPWSTR, uSize: UINT) -> UINT;
     }
 }
@@ -1275,6 +1270,25 @@ compat_fn! {
         Timeout: PLARGE_INTEGER
     ) -> NTSTATUS {
         panic!("keyed events not available")
+    }
+}
+
+compat_fn! {
+    "kernel32":
+
+    // >= Vista / Server 2003
+    // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setthreadstackguarantee
+    #[cfg(not(target_vendor = "uwp"))]
+    pub fn SetThreadStackGuarantee(_size: *mut c_ulong) -> BOOL {
+        panic!("unavailable")
+    }
+
+    // >= XP
+    // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-addvectoredexceptionhandler
+    pub fn AddVectoredExceptionHandler(FirstHandler: ULONG,
+        VectoredHandler: PVECTORED_EXCEPTION_HANDLER)
+        -> LPVOID {
+        panic!("unavailable")
     }
 }
 
