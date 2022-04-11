@@ -946,6 +946,8 @@ supported_targets! {
     ("i686-pc-windows-msvc", i686_pc_windows_msvc),
     ("i686-uwp-windows-msvc", i686_uwp_windows_msvc),
     ("i586-pc-windows-msvc", i586_pc_windows_msvc),
+    ("i686-rust9x-windows-msvc", i686_rust9x_windows_msvc),
+    ("i586-rust9x-windows-msvc", i586_rust9x_windows_msvc),
     ("thumbv7a-pc-windows-msvc", thumbv7a_pc_windows_msvc),
     ("thumbv7a-uwp-windows-msvc", thumbv7a_uwp_windows_msvc),
 
