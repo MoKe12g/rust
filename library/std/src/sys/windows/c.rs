@@ -1010,17 +1010,6 @@ extern "system" {
         lpNumberOfBytesTransferred: LPDWORD,
         bWait: BOOL,
     ) -> BOOL;
-    pub fn CreateSymbolicLinkW(
-        lpSymlinkFileName: LPCWSTR,
-        lpTargetFileName: LPCWSTR,
-        dwFlags: DWORD,
-    ) -> BOOLEAN;
-    pub fn GetFinalPathNameByHandleW(
-        hFile: HANDLE,
-        lpszFilePath: LPCWSTR,
-        cchFilePath: DWORD,
-        dwFlags: DWORD,
-    ) -> DWORD;
     pub fn GetFileInformationByHandleEx(
         hFile: HANDLE,
         fileInfoClass: FILE_INFO_BY_HANDLE_CLASS,
@@ -1360,6 +1349,29 @@ compat_fn! {
     ) -> BOOL {
         SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
         FALSE
+    }
+
+    // >= Vista / Server 2008
+    // https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew
+    pub fn GetFinalPathNameByHandleW(
+        hFile: HANDLE,
+        lpszFilePath: LPCWSTR,
+        cchFilePath: DWORD,
+        dwFlags: DWORD
+    ) -> DWORD {
+        SetLastError (ERROR_CALL_NOT_IMPLEMENTED as DWORD);
+        0
+    }
+
+    // >= Vista / Server 2008
+    // https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createsymboliclinkw
+    pub fn CreateSymbolicLinkW(
+        lpSymlinkFileName: LPCWSTR,
+        lpTargetFileName: LPCWSTR,
+        dwFlags: DWORD
+    ) -> BOOLEAN {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
+        0
     }
 }
 
