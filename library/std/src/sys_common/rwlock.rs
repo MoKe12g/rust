@@ -6,12 +6,23 @@ use crate::sys::locks as imp;
 ///
 /// This rwlock has a const constructor ([`StaticRWLock::new`]), does not
 /// implement `Drop` to cleanup resources.
-pub struct StaticRWLock(imp::RWLock);
+#[cfg(not(windows))]
+pub struct StaticRWLock(imp::MovableRWLock);
+
+#[cfg(windows)]
+pub struct StaticRWLock(imp::StaticRWLock);
 
 impl StaticRWLock {
     /// Creates a new rwlock for use.
+    #[cfg(not(windows))]
     pub const fn new() -> Self {
-        Self(imp::RWLock::new())
+        Self(imp::MovableRWLock::new())
+    }
+
+    /// Creates a new rwlock for use.
+    #[cfg(windows)]
+    pub const fn new() -> Self {
+        Self(imp::StaticRWLock::new())
     }
 
     /// Acquires shared access to the underlying lock, blocking the current
@@ -35,8 +46,13 @@ impl StaticRWLock {
     }
 }
 
+#[cfg(not(windows))]
 #[must_use]
-pub struct StaticRWLockReadGuard(&'static imp::RWLock);
+pub struct StaticRWLockReadGuard(&'static imp::MovableRWLock);
+
+#[cfg(windows)]
+#[must_use]
+pub struct StaticRWLockReadGuard(&'static imp::StaticRWLock);
 
 impl Drop for StaticRWLockReadGuard {
     #[inline]
@@ -47,8 +63,13 @@ impl Drop for StaticRWLockReadGuard {
     }
 }
 
+#[cfg(not(windows))]
 #[must_use]
-pub struct StaticRWLockWriteGuard(&'static imp::RWLock);
+pub struct StaticRWLockWriteGuard(&'static imp::MovableRWLock);
+
+#[cfg(windows)]
+#[must_use]
+pub struct StaticRWLockWriteGuard(&'static imp::StaticRWLock);
 
 impl Drop for StaticRWLockWriteGuard {
     #[inline]
@@ -74,7 +95,7 @@ pub struct MovableRWLock(imp::MovableRWLock);
 impl MovableRWLock {
     /// Creates a new reader-writer lock for use.
     pub fn new() -> Self {
-        Self(imp::MovableRWLock::from(imp::RWLock::new()))
+        Self(imp::MovableRWLock::from(imp::MovableRWLock::new()))
     }
 
     /// Acquires shared access to the underlying lock, blocking the current
