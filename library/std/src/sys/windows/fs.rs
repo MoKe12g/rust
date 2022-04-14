@@ -1,6 +1,6 @@
 use crate::os::windows::prelude::*;
 
-use crate::convert::TryInto;
+use crate::convert::{TryFrom, TryInto};
 use crate::ffi::OsString;
 use crate::fmt;
 use crate::io::{self, Error, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
@@ -12,7 +12,7 @@ use crate::slice;
 use crate::sync::Arc;
 use crate::sys::handle::Handle;
 use crate::sys::time::SystemTime;
-use crate::sys::{c, cvt};
+use crate::sys::{c, compat, cvt};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
 
 use super::path::maybe_verbatim;
@@ -1220,36 +1220,88 @@ pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
 }
 
 pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
-    unsafe extern "system" fn callback(
-        _TotalFileSize: c::LARGE_INTEGER,
-        _TotalBytesTransferred: c::LARGE_INTEGER,
-        _StreamSize: c::LARGE_INTEGER,
-        StreamBytesTransferred: c::LARGE_INTEGER,
-        dwStreamNumber: c::DWORD,
-        _dwCallbackReason: c::DWORD,
-        _hSourceFile: c::HANDLE,
-        _hDestinationFile: c::HANDLE,
-        lpData: c::LPVOID,
-    ) -> c::DWORD {
-        if dwStreamNumber == 1 {
-            *(lpData as *mut i64) = StreamBytesTransferred;
-        }
-        c::PROGRESS_CONTINUE
-    }
     let pfrom = maybe_verbatim(from)?;
     let pto = maybe_verbatim(to)?;
-    let mut size = 0i64;
-    cvt(unsafe {
-        c::CopyFileExW(
-            pfrom.as_ptr(),
-            pto.as_ptr(),
-            Some(callback),
-            &mut size as *mut _ as *mut _,
-            ptr::null_mut(),
-            0,
-        )
-    })?;
-    Ok(size as u64)
+
+    // NT 4+
+    //
+    // For some reason, unicows implements CopyFileExW similarly to other functions (convert to
+    // ANSI, call ...A API). However, 9x/ME don't support CopyFileExA either! This means we have to
+    // check both for the API to exist *and* that we're running on NT.
+    if c::CopyFileExW::available() && compat::version::is_windows_nt() {
+        unsafe extern "system" fn callback(
+            _TotalFileSize: c::LARGE_INTEGER,
+            _TotalBytesTransferred: c::LARGE_INTEGER,
+            _StreamSize: c::LARGE_INTEGER,
+            StreamBytesTransferred: c::LARGE_INTEGER,
+            dwStreamNumber: c::DWORD,
+            _dwCallbackReason: c::DWORD,
+            _hSourceFile: c::HANDLE,
+            _hDestinationFile: c::HANDLE,
+            lpData: c::LPVOID,
+        ) -> c::DWORD {
+            if dwStreamNumber == 1 {
+                *(lpData as *mut i64) = StreamBytesTransferred;
+            }
+            c::PROGRESS_CONTINUE
+        }
+
+        let mut size = 0i64;
+        cvt(unsafe {
+            c::CopyFileExW(
+                pfrom.as_ptr(),
+                pto.as_ptr(),
+                Some(callback),
+                &mut size as *mut _ as *mut _,
+                ptr::null_mut(),
+                0,
+            )
+        })?;
+        Ok(size as u64)
+    } else {
+        // NT 3.51 and earlier, or 9x/ME
+
+        // If `CopyFileExW` is not available, we have to copy the file with the non-Ex API,
+        // then open it with `dwDesiredAccess = 0` (query attributes only),
+        // then use `GetFileSize` to retrieve the size
+        cvt(unsafe {
+            c::CopyFileW(
+                pfrom.as_ptr(),
+                pto.as_ptr(),
+                c::FALSE, // FALSE: allow overwriting
+            )
+        })?;
+
+        let handle = unsafe {
+            c::CreateFileW(
+                pto.as_ptr(),
+                0,
+                c::FILE_SHARE_READ | c::FILE_SHARE_WRITE,
+                ptr::null_mut(),
+                c::OPEN_EXISTING,
+                0,
+                ptr::null_mut(),
+            )
+        };
+
+        let handle = if let Ok(handle) = OwnedHandle::try_from(handle) {
+            handle
+        } else {
+            return Err(Error::last_os_error());
+        };
+
+        let mut upper_dword: c::DWORD = 0;
+        let lower_dword = unsafe { c::GetFileSize(handle.as_raw_handle(), &mut upper_dword) };
+
+        if lower_dword == c::INVALID_FILE_SIZE {
+            let errno = crate::sys::os::errno();
+            if errno != c::STATUS_SUCCESS {
+                return Err(Error::from_raw_os_error(errno));
+            }
+        }
+
+        Ok((upper_dword as u64) << 32 | lower_dword as u64)
+    }
 }
 
 #[allow(dead_code)]
