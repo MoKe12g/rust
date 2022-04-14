@@ -2027,6 +2027,11 @@ fn default_to_whole_archive(sess: &Session, crate_type: CrateType, cmd: &dyn Lin
         && !(sess.target.limit_rdylib_exports && cmd.exported_symbol_means_used_symbol())
 }
 
+const UNICOWS_LIBS: &[&str] = &[
+    "kernel32", "advapi32", "user32", "gdi32", "shell32", "comdlg32", "version", "mpr", "rasapi32",
+    "winmm", "winspool", "vfw32", "secur32", "oleacc", "oledlg", "sensapi",
+];
+
 /// # Native library linking
 ///
 /// User-supplied library search paths (-L on the command line). These are the same paths used to
@@ -2042,6 +2047,8 @@ fn add_local_native_libraries(
     codegen_results: &CodegenResults,
     crate_type: CrateType,
 ) {
+    let is_target_oldpc = sess.target.vendor == "rust9x";
+
     let filesearch = sess.target_filesearch(PathKind::All);
     for search_path in filesearch.search_paths() {
         match search_path.kind {
@@ -2071,7 +2078,14 @@ fn add_local_native_libraries(
             (lib.name, lib.kind, lib.verbatim)
         };
 
+        if is_target_oldpc && UNICOWS_LIBS.contains(&name.as_str()) {
+            // skip adding unicows-wrapped libraries in order to properly support adding
+            // `unicows.lib` before them
+            continue;
+        }
+
         let verbatim = lib.verbatim.unwrap_or(false);
+
         match lib.kind {
             NativeLibKind::Dylib { as_needed } => {
                 cmd.link_dylib(name, verbatim, as_needed.unwrap_or(true))
@@ -2424,6 +2438,8 @@ fn add_upstream_native_libraries(
     sess: &Session,
     codegen_results: &CodegenResults,
 ) {
+    let is_target_oldpc = sess.target.vendor == "rust9x";
+
     let mut last = (None, NativeLibKind::Unspecified, None);
     for &cnum in &codegen_results.crate_info.used_crates {
         for lib in codegen_results.crate_info.native_libraries[&cnum].iter() {
@@ -2440,6 +2456,12 @@ fn add_upstream_native_libraries(
             } else {
                 (lib.name, lib.kind, lib.verbatim)
             };
+
+            if is_target_oldpc && UNICOWS_LIBS.contains(&name.as_str()) {
+                // skip adding unicows-wrapped libraries in order to properly support adding
+                // `unicows.lib` before them
+                continue;
+            }
 
             let verbatim = lib.verbatim.unwrap_or(false);
             match lib.kind {
