@@ -16,6 +16,8 @@ use libc::{c_void, size_t, wchar_t};
 mod errors;
 pub use errors::*;
 
+mod wspiapi;
+
 pub use self::EXCEPTION_DISPOSITION::*;
 pub use self::FILE_INFO_BY_HANDLE_CLASS::*;
 
@@ -1089,13 +1091,6 @@ extern "system" {
     pub fn bind(socket: SOCKET, address: *const SOCKADDR, address_len: socklen_t) -> c_int;
     pub fn listen(socket: SOCKET, backlog: c_int) -> c_int;
     pub fn connect(socket: SOCKET, address: *const SOCKADDR, len: c_int) -> c_int;
-    pub fn getaddrinfo(
-        node: *const c_char,
-        service: *const c_char,
-        hints: *const ADDRINFOA,
-        res: *mut *mut ADDRINFOA,
-    ) -> c_int;
-    pub fn freeaddrinfo(res: *mut ADDRINFOA);
     pub fn select(
         nfds: c_int,
         readfds: *mut fd_set,
@@ -1458,5 +1453,46 @@ compat_fn_lazy! {
         lpProfileDir: LPWSTR,
         lpcchSize: *mut DWORD) -> BOOL {
         rtabort!("unavailable")
+    }
+}
+
+compat_fn_lazy! {
+    "ws2_32":{unicows: false, load: true}:
+
+    // >= NT4/2000 with IPv6 Tech Preview
+    pub fn getaddrinfo(
+        node: *const c_char,
+        service: *const c_char,
+        hints: *const ADDRINFOA,
+        res: *mut *mut ADDRINFOA
+    ) -> c_int {
+        wship6::getaddrinfo(node, service, hints, res)
+    }
+    // >= NT4/2000 with IPv6 Tech Preview
+    pub fn freeaddrinfo(res: *mut ADDRINFOA) -> () {
+        wship6::freeaddrinfo(res)
+    }
+}
+
+mod wship6 {
+    use super::wspiapi::{wspiapi_freeaddrinfo, wspiapi_getaddrinfo};
+    use super::{c_char, c_int, ADDRINFOA};
+
+    compat_fn_lazy! {
+        "wship6":{unicows: false, load: true}:
+
+        // >= 2000 with IPv6 Tech Preview
+        pub fn getaddrinfo(
+            node: *const c_char,
+            service: *const c_char,
+            hints: *const ADDRINFOA,
+            res: *mut *mut ADDRINFOA
+        ) -> c_int {
+            wspiapi_getaddrinfo(node, service, hints, res)
+        }
+        // >= 2000 with IPv6 Tech Preview
+        pub fn freeaddrinfo(res: *mut ADDRINFOA) -> () {
+            wspiapi_freeaddrinfo(res)
+        }
     }
 }
