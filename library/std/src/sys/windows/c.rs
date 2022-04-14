@@ -773,26 +773,6 @@ if #[cfg(not(target_vendor = "uwp"))] {
 
     pub const TOKEN_READ: DWORD = 0x20008;
 
-    #[link(name = "advapi32")]
-    extern "system" {
-        // Allowed but unused by UWP
-        pub fn OpenProcessToken(
-            ProcessHandle: HANDLE,
-            DesiredAccess: DWORD,
-            TokenHandle: *mut HANDLE,
-        ) -> BOOL;
-    }
-
-    #[link(name = "userenv")]
-    extern "system" {
-        // Allowed but unused by UWP
-        pub fn GetUserProfileDirectoryW(
-            hToken: HANDLE,
-            lpProfileDir: LPWSTR,
-            lpcchSize: *mut DWORD,
-        ) -> BOOL;
-    }
-
     #[link(name = "kernel32")]
     extern "system" {
         // Functions forbidden when targeting UWP
@@ -1126,18 +1106,6 @@ extern "system" {
     ) -> c_int;
 }
 
-#[link(name = "bcrypt")]
-extern "system" {
-    // >= Vista / Server 2008
-    // https://docs.microsoft.com/en-us/windows/win32/api/bcrypt/nf-bcrypt-bcryptgenrandom
-    pub fn BCryptGenRandom(
-        hAlgorithm: LPVOID,
-        pBuffer: *mut u8,
-        cbBuffer: ULONG,
-        dwFlags: ULONG,
-    ) -> NTSTATUS;
-}
-
 // Functions that aren't available on every version of Windows that we support,
 // but we still use them and just provide some form of a fallback implementation.
 compat_fn! {
@@ -1407,6 +1375,9 @@ extern "system" {
         lpDistanceToMoveHigh: *mut LONG,
         dwMoveMethod: DWORD,
     ) -> DWORD;
+
+    pub fn GetTickCount() -> DWORD;
+    pub fn GetCurrentThreadId() -> DWORD;
 }
 
 #[repr(C)]
@@ -1425,3 +1396,59 @@ pub type LPSYSTEMTIME = *mut SYSTEMTIME;
 
 pub const INVALID_SET_FILE_POINTER: DWORD = 0xFFFFFFFF;
 pub const NO_ERROR: DWORD = 0;
+
+compat_fn_lazy! {
+    "bcrypt":{unicows: false, load: true}:
+
+    // >= Vista / Server 2008
+    // https://docs.microsoft.com/en-us/windows/win32/api/bcrypt/nf-bcrypt-bcryptgenrandom
+    pub fn BCryptGenRandom(
+        hAlgorithm: LPVOID,
+        pBuffer: *mut u8,
+        cbBuffer: ULONG,
+        dwFlags: ULONG
+    ) -> NTSTATUS {
+        if RtlGenRandom(pBuffer, cbBuffer) == TRUE as _ {
+            0 // STATUS_SUCCESS
+        } else {
+            0xC0000001u32 as i32 // STATUS_UNSUCCESSFUL
+        }
+    }
+}
+
+compat_fn_lazy! {
+    "advapi32":{unicows: false, load: true}:
+
+    // >= NT 3.1+
+    // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken
+    pub fn OpenProcessToken(ProcessHandle: HANDLE,
+        DesiredAccess: DWORD,
+        TokenHandle: *mut HANDLE) -> BOOL {
+        rtabort!("unavailable")
+    }
+
+    // RtlGenRandom
+    //
+    // >= Vista / Server 2008
+    // https://docs.microsoft.com/en-us/windows/win32/api/ntsecapi/nf-ntsecapi-rtlgenrandom
+    pub fn SystemFunction036(RandomBuffer: *mut u8, RandomBufferLength: ULONG) -> BOOLEAN {
+        rtabort!("unavailable")
+    }
+}
+
+#[inline(always)]
+pub unsafe fn RtlGenRandom(RandomBuffer: *mut u8, RandomBufferLength: ULONG) -> BOOLEAN {
+    SystemFunction036(RandomBuffer, RandomBufferLength)
+}
+
+compat_fn_lazy! {
+    "userenv":{unicows: false, load: true}:
+
+    // >= NT 4
+    // https://docs.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-getuserprofiledirectoryw
+    pub fn GetUserProfileDirectoryW(hToken: HANDLE,
+        lpProfileDir: LPWSTR,
+        lpcchSize: *mut DWORD) -> BOOL {
+        rtabort!("unavailable")
+    }
+}
