@@ -1001,8 +1001,22 @@ pub fn unlink(p: &Path) -> io::Result<()> {
 pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
     let old = maybe_verbatim(old)?;
     let new = maybe_verbatim(new)?;
-    cvt(unsafe { c::MoveFileExW(old.as_ptr(), new.as_ptr(), c::MOVEFILE_REPLACE_EXISTING) })?;
-    Ok(())
+    let res =
+        cvt(unsafe { c::MoveFileExW(old.as_ptr(), new.as_ptr(), c::MOVEFILE_REPLACE_EXISTING) });
+
+    match res {
+        Err(ref e) if e.raw_os_error() == Some(c::ERROR_CALL_NOT_IMPLEMENTED as i32) => {
+            // 9x/ME doesn't support MoveFileEx, so we fall back to copy + delete and hope for the
+            // best
+            unsafe {
+                cvt(c::CopyFileW(old.as_ptr(), new.as_ptr(), c::TRUE))?;
+                cvt(c::DeleteFileW(old.as_ptr()))?;
+                Ok(())
+            }
+        }
+        Err(e) => Err(e),
+        Ok(_) => Ok(()),
+    }
 }
 
 pub fn rmdir(p: &Path) -> io::Result<()> {
