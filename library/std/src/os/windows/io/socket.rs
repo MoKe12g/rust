@@ -81,13 +81,13 @@ impl OwnedSocket {
     /// Creates a new `OwnedSocket` instance that shares the same underlying socket
     /// as the existing `OwnedSocket` instance.
     pub fn try_clone(&self) -> io::Result<Self> {
-        let mut info = unsafe { mem::zeroed::<c::WSAPROTOCOL_INFO>() };
+        let mut info = unsafe { mem::zeroed::<c::WSAPROTOCOL_INFOA>() };
         let result = unsafe {
-            c::WSADuplicateSocketW(self.as_raw_socket(), c::GetCurrentProcessId(), &mut info)
+            c::WSADuplicateSocketA(self.as_raw_socket(), c::GetCurrentProcessId(), &mut info)
         };
         sys::net::cvt(result)?;
         let socket = unsafe {
-            c::WSASocketW(
+            c::WSASocketA(
                 info.iAddressFamily,
                 info.iSocketType,
                 info.iProtocol,
@@ -107,7 +107,7 @@ impl OwnedSocket {
             }
 
             let socket = unsafe {
-                c::WSASocketW(
+                c::WSASocketA(
                     info.iAddressFamily,
                     info.iSocketType,
                     info.iProtocol,

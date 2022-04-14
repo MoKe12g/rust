@@ -106,7 +106,7 @@ impl Socket {
             SocketAddr::V6(..) => c::AF_INET6,
         };
         let socket = unsafe {
-            c::WSASocketW(
+            c::WSASocketA(
                 family,
                 ty,
                 0,
@@ -126,7 +126,7 @@ impl Socket {
             }
 
             let socket =
-                unsafe { c::WSASocketW(family, ty, 0, ptr::null_mut(), 0, c::WSA_FLAG_OVERLAPPED) };
+                unsafe { c::WSASocketA(family, ty, 0, ptr::null_mut(), 0, c::WSA_FLAG_OVERLAPPED) };
 
             if socket == c::INVALID_SOCKET {
                 return Err(last_error());

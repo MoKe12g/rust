@@ -58,7 +58,7 @@ pub type LPVOID = *mut c_void;
 pub type LPWCH = *mut WCHAR;
 pub type LPWIN32_FIND_DATAW = *mut WIN32_FIND_DATAW;
 pub type LPWSADATA = *mut WSADATA;
-pub type LPWSAPROTOCOL_INFO = *mut WSAPROTOCOL_INFO;
+pub type LPWSAPROTOCOL_INFOA = *mut WSAPROTOCOL_INFOA;
 pub type LPWSTR = *mut WCHAR;
 pub type LPFILETIME = *mut FILETIME;
 pub type LPSYSTEM_INFO = *mut SYSTEM_INFO;
@@ -356,7 +356,7 @@ pub struct WSABUF {
 }
 
 #[repr(C)]
-pub struct WSAPROTOCOL_INFO {
+pub struct WSAPROTOCOL_INFOA {
     pub dwServiceFlags1: DWORD,
     pub dwServiceFlags2: DWORD,
     pub dwServiceFlags3: DWORD,
@@ -376,7 +376,7 @@ pub struct WSAPROTOCOL_INFO {
     pub iSecurityScheme: c_int,
     pub dwMessageSize: DWORD,
     pub dwProviderReserved: DWORD,
-    pub szProtocol: [u16; (WSAPROTOCOL_LEN as usize) + 1],
+    pub szProtocol: [CHAR; (WSAPROTOCOL_LEN as usize) + 1],
 }
 
 #[repr(C)]
@@ -1018,10 +1018,10 @@ extern "system" {
     pub fn WSAStartup(wVersionRequested: WORD, lpWSAData: LPWSADATA) -> c_int;
     pub fn WSACleanup() -> c_int;
     pub fn WSAGetLastError() -> c_int;
-    pub fn WSADuplicateSocketW(
+    pub fn WSADuplicateSocketA(
         s: SOCKET,
         dwProcessId: DWORD,
-        lpProtocolInfo: LPWSAPROTOCOL_INFO,
+        lpProtocolInfo: LPWSAPROTOCOL_INFOA,
     ) -> c_int;
     pub fn WSASend(
         s: SOCKET,
@@ -1041,11 +1041,11 @@ extern "system" {
         lpOverlapped: LPWSAOVERLAPPED,
         lpCompletionRoutine: LPWSAOVERLAPPED_COMPLETION_ROUTINE,
     ) -> c_int;
-    pub fn WSASocketW(
+    pub fn WSASocketA(
         af: c_int,
         kind: c_int,
         protocol: c_int,
-        lpProtocolInfo: LPWSAPROTOCOL_INFO,
+        lpProtocolInfo: LPWSAPROTOCOL_INFOA,
         g: GROUP,
         dwFlags: DWORD,
     ) -> SOCKET;
