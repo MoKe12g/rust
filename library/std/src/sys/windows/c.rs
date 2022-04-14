@@ -1395,6 +1395,7 @@ extern "system" {
 
     pub fn GetTickCount() -> DWORD;
     pub fn GetCurrentThreadId() -> DWORD;
+    pub fn GetVersion() -> DWORD;
 }
 
 #[repr(C)]

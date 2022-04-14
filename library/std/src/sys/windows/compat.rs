@@ -52,6 +52,8 @@
 use crate::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::sys::c;
 
+pub(crate) mod version;
+
 pub(crate) const UNICOWS_MODULE_NAME: &str = "unicows\0";
 
 macro_rules! compat_fn {
