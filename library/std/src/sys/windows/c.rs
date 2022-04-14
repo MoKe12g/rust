@@ -798,7 +798,6 @@ if #[cfg(not(target_vendor = "uwp"))] {
             hFile: HANDLE,
             lpFileInformation: LPBY_HANDLE_FILE_INFORMATION,
         ) -> BOOL;
-        pub fn SetHandleInformation(hObject: HANDLE, dwMask: DWORD, dwFlags: DWORD) -> BOOL;
         pub fn CreateHardLinkW(
             lpSymlinkFileName: LPCWSTR,
             lpTargetFileName: LPCWSTR,
@@ -1340,6 +1339,15 @@ compat_fn! {
     ) -> BOOLEAN {
         SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
         0
+    }
+
+    // >= NT 3.51+
+    // https://docs.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-sethandleinformation
+    pub fn SetHandleInformation(hObject: HANDLE,
+        dwMask: DWORD,
+        dwFlags: DWORD) -> BOOL {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
+        FALSE
     }
 }
 

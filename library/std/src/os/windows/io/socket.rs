@@ -132,10 +132,23 @@ impl OwnedSocket {
     // FIXME(strict_provenance_magic): we defined RawSocket to be a u64 ;-;
     #[cfg(not(target_vendor = "uwp"))]
     pub(crate) fn set_no_inherit(&self) -> io::Result<()> {
-        cvt(unsafe {
+        let res = cvt(unsafe {
             c::SetHandleInformation(self.as_raw_socket() as c::HANDLE, c::HANDLE_FLAG_INHERIT, 0)
         })
-        .map(drop)
+        .map(drop);
+
+        match res {
+            // SetHandleInformation is exported by kernel32 on Win9X/ME, but is just stubbed,
+            // returning `ERROR_CALL_NOT_IMPLEMENTED`. Sockets are non-inheritable on these
+            // systems anyways, so we "fail successfully" here.
+            // https://www.betaarchive.com/wiki/index.php/Microsoft_KB_Archive/150523#MORE_INFORMATION
+
+            // SetHandleInformation is also unavailable on WinNT before 3.51. This is fine,
+            // however, because MS did not supply WinSock 2 for Windows NT before 4.0, so this
+            // function is not called.
+            Err(e) if e.raw_os_error() == Some(c::ERROR_CALL_NOT_IMPLEMENTED as i32) => Ok(()),
+            res => res,
+        }
     }
 
     #[cfg(target_vendor = "uwp")]
