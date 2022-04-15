@@ -976,13 +976,6 @@ extern "system" {
         dwBufferSize: DWORD,
     ) -> BOOL;
 
-    pub fn CompareStringOrdinal(
-        lpString1: LPCWSTR,
-        cchCount1: c_int,
-        lpString2: LPCWSTR,
-        cchCount2: c_int,
-        bIgnoreCase: BOOL,
-    ) -> c_int;
     pub fn GetFullPathNameW(
         lpFileName: LPCWSTR,
         nBufferLength: DWORD,
@@ -1363,6 +1356,18 @@ compat_fn! {
     ) -> BOOL {
         SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
         FALSE
+    }
+
+    // >= Vista / Server 2008
+    // https://docs.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-comparestringordinal
+    pub fn CompareStringOrdinal(
+        lpString1: LPCWSTR,
+        cchCount1: c_int,
+        lpString2: LPCWSTR,
+        cchCount2: c_int,
+        bIgnoreCase: BOOL
+    ) -> c_int {
+        rtabort!("unavailable")
     }
 }
 
