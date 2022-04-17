@@ -1036,6 +1036,22 @@ fn open_link(path: &Path, access_mode: u32) -> io::Result<File> {
 }
 
 pub fn remove_dir_all(path: &Path) -> io::Result<()> {
+    // if the modern file/directory APIs are not available, we'll fall back to the old (unsafe, see
+    // https://github.com/rust-lang/rust/pull/93112) directory removal implementation
+    if !c::NtCreateFile::available()
+        || !c::GetFileInformationByHandleEx::available()
+        || !c::SetFileInformationByHandle::available()
+    {
+        let filetype = lstat(path)?.file_type();
+        if filetype.is_symlink() {
+            // On Windows symlinks to files and directories are removed differently.
+            // rmdir only deletes dir symlinks and junctions, not file symlinks.
+            return rmdir(path);
+        } else {
+            return remove_dir_all_recursive_old(path);
+        }
+    }
+
     let file = open_link(path, c::DELETE | c::FILE_LIST_DIRECTORY)?;
 
     // Test if the file is not a directory or a symlink to a directory.
@@ -1125,6 +1141,21 @@ fn remove_dir_all_recursive(f: &File, delete: fn(&File) -> io::Result<()>) -> io
         restart = false;
     }
     delete(&f)
+}
+
+fn remove_dir_all_recursive_old(path: &Path) -> io::Result<()> {
+    for child in readdir(path)? {
+        let child = child?;
+        let child_type = child.file_type()?;
+        if child_type.is_dir() {
+            remove_dir_all_recursive_old(&child.path())?;
+        } else if child_type.is_symlink_dir() {
+            rmdir(&child.path())?;
+        } else {
+            unlink(&child.path())?;
+        }
+    }
+    rmdir(path)
 }
 
 pub fn readlink(path: &Path) -> io::Result<PathBuf> {

@@ -969,12 +969,6 @@ extern "system" {
         lpNumberOfBytesTransferred: LPDWORD,
         bWait: BOOL,
     ) -> BOOL;
-    pub fn GetFileInformationByHandleEx(
-        hFile: HANDLE,
-        fileInfoClass: FILE_INFO_BY_HANDLE_CLASS,
-        lpFileInformation: LPVOID,
-        dwBufferSize: DWORD,
-    ) -> BOOL;
 
     pub fn GetFullPathNameW(
         lpFileName: LPCWSTR,
@@ -1368,6 +1362,18 @@ compat_fn! {
         bIgnoreCase: BOOL
     ) -> c_int {
         rtabort!("unavailable")
+    }
+
+    // >= Vista / Server 2008 (XP / Server 2003 when linking a supported FileExtd.lib)
+    // https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getfileinformationbyhandleex
+    pub fn GetFileInformationByHandleEx(
+        hFile: HANDLE,
+        fileInfoClass: FILE_INFO_BY_HANDLE_CLASS,
+        lpFileInformation: LPVOID,
+        dwBufferSize: DWORD
+    ) -> BOOL {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
+        FALSE
     }
 }
 
