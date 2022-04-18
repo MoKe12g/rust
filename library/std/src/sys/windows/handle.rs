@@ -125,6 +125,24 @@ impl Handle {
         };
         match res {
             Ok(_) => Ok(read as usize),
+            Err(ref e)
+                if !crate::sys::compat::version::is_windows_nt()
+                    && e.raw_os_error() == Some(c::ERROR_INVALID_PARAMETER as i32) =>
+            {
+                // Windows 9X/ME doesn't support overlapped I/O on most kinds of handles, so if
+                // we're here we'll have to emulate the behavior by manually seeking and reading.
+
+                unsafe {
+                    cvt(c::SetFilePointerEx(
+                        self.as_raw_handle(),
+                        offset as c::LARGE_INTEGER,
+                        ptr::null_mut(),
+                        c::FILE_BEGIN,
+                    ))?;
+                }
+
+                self.read(buf)
+            }
             Err(ref e) if e.raw_os_error() == Some(c::ERROR_HANDLE_EOF as i32) => Ok(0),
             Err(e) => Err(e),
         }
@@ -247,7 +265,7 @@ impl Handle {
     pub fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
         let mut written = 0;
         let len = cmp::min(buf.len(), <c::DWORD>::MAX as usize) as c::DWORD;
-        unsafe {
+        let res = unsafe {
             let mut overlapped: c::OVERLAPPED = mem::zeroed();
             overlapped.Offset = offset as u32;
             overlapped.OffsetHigh = (offset >> 32) as u32;
@@ -257,9 +275,30 @@ impl Handle {
                 len,
                 &mut written,
                 &mut overlapped,
-            ))?;
+            ))
+        };
+        match res {
+            Ok(_) => Ok(written as usize),
+            Err(ref e)
+                if !crate::sys::compat::version::is_windows_nt()
+                    && e.raw_os_error() == Some(c::ERROR_INVALID_PARAMETER as i32) =>
+            {
+                // Windows 9X/ME doesn't support overlapped I/O on most kinds of handles, so if
+                // we're here we'll have to emulate the behavior by manually seeking and writing.
+
+                unsafe {
+                    cvt(c::SetFilePointerEx(
+                        self.as_raw_handle(),
+                        offset as c::LARGE_INTEGER,
+                        ptr::null_mut(),
+                        c::FILE_BEGIN,
+                    ))?;
+                }
+
+                self.write(buf)
+            }
+            Err(e) => Err(e),
         }
-        Ok(written as usize)
     }
 
     pub fn try_clone(&self) -> io::Result<Self> {
