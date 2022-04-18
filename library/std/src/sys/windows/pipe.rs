@@ -9,6 +9,7 @@ use crate::slice;
 use crate::sync::atomic::AtomicUsize;
 use crate::sync::atomic::Ordering::SeqCst;
 use crate::sys::c;
+use crate::sys::cvt;
 use crate::sys::fs::{File, OpenOptions};
 use crate::sys::handle::Handle;
 use crate::sys::hashmap_random_keys;
@@ -53,6 +54,55 @@ pub struct Pipes {
 /// with `OVERLAPPED` instances, but also works out ok if it's only ever used
 /// once at a time (which we do indeed guarantee).
 pub fn anon_pipe(ours_readable: bool, their_handle_inheritable: bool) -> io::Result<Pipes> {
+    // Since Windows 9X/ME does not support creating named pipes (only connecting to remote pipes
+    // created on NT), we'll have to make do with anonymous pipes, without overlapped I/O. In
+    // particular, this means that we'll have to do reading from two threads in the case where both
+    // stdout and stderr being piped (see `read2`).
+
+    // 9X/ME *does* have a kernel32 export entry for `CreateNamedPipe`, so an availability check
+    // would not work. We're just gonna check the bit that's only set on non-unicode Windows
+    // versions instead...
+
+    // The `AnonPipe` impl used in `read2` below needs to be able to cancel the overlapped i/o
+    // operation, so we also have to check for `CancelIo` being available. This means that the
+    // "modern" path is taken only for NT4+.
+    if !crate::sys::compat::version::is_windows_nt() || !c::CancelIo::available() {
+        let size = mem::size_of::<c::SECURITY_ATTRIBUTES>();
+        let mut sa = c::SECURITY_ATTRIBUTES {
+            nLength: size as c::DWORD,
+            lpSecurityDescriptor: ptr::null_mut(),
+            // We follow the old "Creating a Child Process with Redirected Input and Output" MSDN
+            // entry (pre-`SetHandleInformation`) here, duplicating the handle that is not being
+            // sent to the child process as non-inheritable and then closing the inheritable one.
+            // Usually, this would be racy, but this function is only called in `Stdio::to_handle`,
+            // which is in turn only called form `process::spawn`, which acquires a lock on process
+            // spawning because of this.
+            bInheritHandle: c::TRUE,
+        };
+
+        unsafe {
+            let mut read_pipe = mem::zeroed();
+            let mut write_pipe = mem::zeroed();
+            cvt(c::CreatePipe(&mut read_pipe, &mut write_pipe, &mut sa, 4096))?;
+            let read_pipe = Handle::from_raw_handle(read_pipe);
+            let write_pipe = Handle::from_raw_handle(write_pipe);
+
+            let (ours_inheritable, theirs) =
+                if ours_readable { (read_pipe, write_pipe) } else { (write_pipe, read_pipe) };
+
+            // Make `ours` non-inheritable by duplicating it with the approriate setting
+            let ours = ours_inheritable.duplicate(0, false, c::DUPLICATE_SAME_ACCESS)?;
+
+            // close the old, inheritable handle to the pipe end that is ours
+            drop(ours_inheritable);
+
+            return Ok(Pipes {
+                ours: AnonPipe { inner: ours },
+                theirs: AnonPipe { inner: theirs },
+            });
+        }
+    }
+
     // Note that we specifically do *not* use `CreatePipe` here because
     // unfortunately the anonymous pipes returned do not support overlapped
     // operations. Instead, we create a "hopefully unique" name and create a
@@ -211,6 +261,26 @@ impl AnonPipe {
 pub fn read2(p1: AnonPipe, v1: &mut Vec<u8>, p2: AnonPipe, v2: &mut Vec<u8>) -> io::Result<()> {
     let p1 = p1.into_handle();
     let p2 = p2.into_handle();
+
+    // see `anon_pipe` for the rationale here for this condition
+    if !crate::sys::compat::version::is_windows_nt() || !c::CancelIo::available() {
+        use crate::io::Read;
+
+        // Since we are using anonymous pipes (= without overlapped I/O support) here, we can't do
+        // async waiting on both stdout and stderr at the same time on one thread, so we have to
+        // spawn an additional thread to do the waiting for the second pipe.
+
+        // See https://github.com/rust-lang/rust/pull/31618, where this was removed initially.
+        let second_pipe = crate::thread::spawn(move || {
+            let mut ret = Vec::new();
+            (&p2).read_to_end(&mut ret).map(|_| ret)
+        });
+
+        (&p1).read_to_end(v1)?;
+        *v2 = second_pipe.join().unwrap()?;
+
+        return Ok(());
+    }
 
     let mut p1 = AsyncPipe::new(p1, v1)?;
     let mut p2 = AsyncPipe::new(p2, v2)?;

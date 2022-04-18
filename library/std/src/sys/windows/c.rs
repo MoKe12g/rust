@@ -962,7 +962,6 @@ extern "system" {
         nDefaultTimeOut: DWORD,
         lpSecurityAttributes: LPSECURITY_ATTRIBUTES,
     ) -> HANDLE;
-    pub fn CancelIo(handle: HANDLE) -> BOOL;
     pub fn GetOverlappedResult(
         hFile: HANDLE,
         lpOverlapped: LPOVERLAPPED,
@@ -1375,6 +1374,13 @@ compat_fn! {
         SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
         FALSE
     }
+
+    // >= NT 4+, 98+
+    // https://docs.microsoft.com/en-us/windows/win32/fileio/cancelio
+    pub fn CancelIo(handle: HANDLE) -> BOOL {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED as DWORD);
+        FALSE
+    }
 }
 
 #[link(name = "kernel32")]
@@ -1418,6 +1424,12 @@ extern "system" {
         lpExistingFileName: LPCWSTR,
         lpNewFileName: LPCWSTR,
         bFailIfExists: BOOL,
+    ) -> BOOL;
+    pub fn CreatePipe(
+        hReadPipe: *mut HANDLE,
+        hWritePipe: *mut HANDLE,
+        lpPipeAttributes: LPSECURITY_ATTRIBUTES,
+        nSize: DWORD,
     ) -> BOOL;
 }
 
