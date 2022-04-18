@@ -292,7 +292,11 @@ impl Command {
         cmd_str.push(0); // add null terminator
 
         // stolen from the libuv code.
-        let mut flags = self.flags | c::CREATE_UNICODE_ENVIRONMENT;
+        let mut flags = self.flags;
+        if crate::sys::compat::version::is_windows_nt() {
+            // a unicode environment is not supported on 9x/ME
+            flags |= c::CREATE_UNICODE_ENVIRONMENT;
+        }
         if self.detach {
             flags |= c::DETACHED_PROCESS | c::CREATE_NEW_PROCESS_GROUP;
         }
