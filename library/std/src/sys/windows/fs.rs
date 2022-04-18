@@ -187,7 +187,14 @@ impl OpenOptions {
             // system-specific
             custom_flags: 0,
             access_mode: None,
-            share_mode: c::FILE_SHARE_READ | c::FILE_SHARE_WRITE | c::FILE_SHARE_DELETE,
+            share_mode: c::FILE_SHARE_READ
+                | c::FILE_SHARE_WRITE
+                | if crate::sys::compat::version::is_windows_nt() {
+                    // FILE_SHARE_DELETE is only supported on NT-based systems.
+                    c::FILE_SHARE_DELETE
+                } else {
+                    0
+                },
             attributes: 0,
             security_qos_flags: 0,
             security_attributes: ptr::null_mut(),
@@ -237,15 +244,27 @@ impl OpenOptions {
     fn get_access_mode(&self) -> io::Result<c::DWORD> {
         const ERROR_INVALID_PARAMETER: i32 = 87;
 
+        // 9x/ME only supports a limited number of access rights (DELETE, FILE_WRITE_ATTRIBUTES,
+        // GENERIC_READ, and GENERIC_WRITE). This means that we can't use the special append-only
+        // behavior (atomic appends). Additionally, files opened with `append(true)` *will* be able
+        // to seek back and overwrite existing data on these systems.
+        let is_nt = crate::sys::compat::version::is_windows_nt();
+
         match (self.read, self.write, self.append, self.access_mode) {
             (.., Some(mode)) => Ok(mode),
             (true, false, false, None) => Ok(c::GENERIC_READ),
             (false, true, false, None) => Ok(c::GENERIC_WRITE),
             (true, true, false, None) => Ok(c::GENERIC_READ | c::GENERIC_WRITE),
-            (false, _, true, None) => Ok(c::FILE_GENERIC_WRITE & !c::FILE_WRITE_DATA),
-            (true, _, true, None) => {
-                Ok(c::GENERIC_READ | (c::FILE_GENERIC_WRITE & !c::FILE_WRITE_DATA))
-            }
+            (false, _, true, None) => Ok(if is_nt {
+                c::FILE_GENERIC_WRITE & !c::FILE_WRITE_DATA
+            } else {
+                c::GENERIC_WRITE
+            }),
+            (true, _, true, None) => Ok(if is_nt {
+                c::GENERIC_READ | (c::FILE_GENERIC_WRITE & !c::FILE_WRITE_DATA)
+            } else {
+                c::GENERIC_READ | c::GENERIC_WRITE
+            }),
             (false, false, false, None) => Err(Error::from_raw_os_error(ERROR_INVALID_PARAMETER)),
         }
     }
@@ -299,7 +318,16 @@ impl File {
             )
         };
         if let Ok(handle) = handle.try_into() {
-            Ok(File { handle: Handle::from_inner(handle) })
+            let file = File { handle: Handle::from_inner(handle) };
+
+            // 9x/ME do not support FILE_APPEND_DATA/FILE_WRITE_DATA, which means that we cannot get
+            // the append-only behaviors: atomic appends, cursor starts at the end of the file. The
+            // latter can be emulated, at least, by just seeking to the end.
+            if opts.append && !crate::sys::compat::version::is_windows_nt() {
+                file.seek(SeekFrom::End(0))?;
+            }
+
+            Ok(file)
         } else {
             Err(Error::last_os_error())
         }
