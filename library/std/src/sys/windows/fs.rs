@@ -1346,13 +1346,24 @@ fn get_path(f: &File) -> io::Result<PathBuf> {
 }
 
 pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
-    let mut opts = OpenOptions::new();
-    // No read or write permissions are necessary
-    opts.access_mode(0);
-    // This flag is so we can open directories too
-    opts.custom_flags(c::FILE_FLAG_BACKUP_SEMANTICS);
-    let f = File::open(p, &opts)?;
-    get_path(&f)
+    if c::GetFinalPathNameByHandleW::available() {
+        let mut opts = OpenOptions::new();
+        // No read or write permissions are necessary
+        opts.access_mode(0);
+        // This flag is so we can open directories too
+        opts.custom_flags(c::FILE_FLAG_BACKUP_SEMANTICS);
+        let f = File::open(p, &opts)?;
+        get_path(&f)
+    } else {
+        // systems that don't support GetFinalPathNameByHandleW also don't support symlinks, so we
+        // fall back to using GetFullPathName.
+        let path = maybe_verbatim(p)?;
+        let mut file_part = ptr::null_mut();
+        super::fill_utf16_buf(
+            |buf, sz| unsafe { c::GetFullPathNameW(path.as_ptr(), sz, buf, &mut file_part) },
+            |buf| PathBuf::from(OsString::from_wide(buf)),
+        )
+    }
 }
 
 pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
