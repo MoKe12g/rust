@@ -1070,14 +1070,19 @@ pub fn remove_dir_all(path: &Path) -> io::Result<()> {
         || !c::GetFileInformationByHandleEx::available()
         || !c::SetFileInformationByHandle::available()
     {
-        let filetype = lstat(path)?.file_type();
-        if filetype.is_symlink() {
-            // On Windows symlinks to files and directories are removed differently.
-            // rmdir only deletes dir symlinks and junctions, not file symlinks.
-            return rmdir(path);
-        } else {
-            return remove_dir_all_recursive_old(path);
+        // `FILE_FLAG_BACKUP_SEMANTICS` (opening folder handles; used in lstat) is not supported on
+        // Windows 9x/ME. Since we only check whether it is a symlink, skipping it is fine, as these
+        // systems don't support symlinks anyways.
+        if crate::sys::compat::version::is_windows_nt() {
+            let filetype = lstat(path)?.file_type();
+            if filetype.is_symlink() {
+                // On Windows symlinks to files and directories are removed differently.
+                // rmdir only deletes dir symlinks and junctions, not file symlinks.
+                return rmdir(path);
+            }
         }
+
+        return remove_dir_all_recursive_old(path);
     }
 
     let file = open_link(path, c::DELETE | c::FILE_LIST_DIRECTORY)?;
@@ -1250,8 +1255,66 @@ pub fn stat(path: &Path) -> io::Result<FileAttr> {
     let mut opts = OpenOptions::new();
     // No read or write permissions are necessary
     opts.access_mode(0);
-    // This flag is so we can open directories too
-    opts.custom_flags(c::FILE_FLAG_BACKUP_SEMANTICS);
+
+    if crate::sys::compat::version::is_windows_nt() {
+        // This flag is so we can open directories too
+        opts.custom_flags(c::FILE_FLAG_BACKUP_SEMANTICS);
+    } else {
+        let path = maybe_verbatim(path)?;
+        unsafe {
+            // don't get baited by a path containing `*` or `?`, and get at least the attributes in
+            // case `FindFirstFile` fails down below
+            let attr = c::GetFileAttributesW(path.as_ptr());
+            if attr == c::INVALID_FILE_ATTRIBUTES {
+                return Err(crate::io::Error::last_os_error());
+            }
+
+            // since we don't have access to `FILE_FLAG_BACKUP_SEMANTICS` on 9x/ME, fall back to
+            // `FindFirstFile` for directories
+            if attr & c::FILE_ATTRIBUTE_DIRECTORY != 0 {
+                let mut find_data: c::WIN32_FIND_DATAW = mem::zeroed();
+                let handle = c::FindFirstFileW(path.as_ptr(), &mut find_data);
+
+                if handle == c::INVALID_HANDLE_VALUE {
+                    // you can't get info about the root directory via FindFirstFile, so in that
+                    // case and any other cases where FindFirstFile fails, fall back to the
+                    // already-retrieved attributes For directories, attributes are the only thing
+                    // we can get on 9x/ME
+                    return Ok(FileAttr {
+                        attributes: attr,
+                        creation_time: mem::zeroed(),
+                        last_access_time: mem::zeroed(),
+                        last_write_time: mem::zeroed(),
+                        file_size: 0,
+                        reparse_tag: 0,
+                        volume_serial_number: None,
+                        number_of_links: None,
+                        file_index: None,
+                    });
+                }
+
+                let ret = FileAttr {
+                    attributes: find_data.dwFileAttributes,
+                    creation_time: find_data.ftCreationTime,
+                    last_access_time: find_data.ftLastAccessTime,
+                    last_write_time: find_data.ftLastWriteTime,
+                    file_size: ((find_data.nFileSizeHigh as u64) << 32)
+                        | (find_data.nFileSizeLow as u64),
+                    // FSCTL_GET_REPARSE_POINT doesn't exist on 9x/ME, so we don't even try to grab
+                    // that
+                    reparse_tag: 0,
+                    volume_serial_number: None,
+                    number_of_links: None,
+                    file_index: None,
+                };
+
+                cvt(c::FindClose(handle))?;
+
+                return Ok(ret);
+            }
+        }
+    }
+
     let file = File::open(path, &opts)?;
     file.file_attr()
 }
@@ -1437,14 +1500,8 @@ fn symlink_junction_inner(original: &Path, junction: &Path) -> io::Result<()> {
 
 // Try to see if a file exists but, unlike `exists`, report I/O errors.
 pub fn try_exists(path: &Path) -> io::Result<bool> {
-    // Open the file to ensure any symlinks are followed to their target.
-    let mut opts = OpenOptions::new();
-    // No read, write, etc access rights are needed.
-    opts.access_mode(0);
-    // Backup semantics enables opening directories as well as files.
-    opts.custom_flags(c::FILE_FLAG_BACKUP_SEMANTICS);
-    match File::open(path, &opts) {
-        Err(e) => match e.kind() {
+    fn match_kind(e: crate::io::Error) -> io::Result<bool> {
+        match e.kind() {
             // The file definitely does not exist
             io::ErrorKind::NotFound => Ok(false),
 
@@ -1457,7 +1514,36 @@ pub fn try_exists(path: &Path) -> io::Result<bool> {
             // file exists. However, these types of errors are usually more
             // permanent so we report them here.
             _ => Err(e),
-        },
+        }
+    }
+
+    // Open the file to ensure any symlinks are followed to their target.
+    let mut opts = OpenOptions::new();
+    // No read, write, etc access rights are needed.
+    opts.access_mode(0);
+
+    // we don't have access to `FILE_FLAG_BACKUP_SEMANTICS` on 9x/ME, so fall back to a
+    // GetFileAttributes call and skip opening if we encounter a directory
+    if crate::sys::compat::version::is_windows_nt() {
+        // Backup semantics enables opening directories as well as files.
+        opts.custom_flags(c::FILE_FLAG_BACKUP_SEMANTICS);
+    } else {
+        let path = maybe_verbatim(path)?;
+
+        let attr = unsafe { c::GetFileAttributesW(path.as_ptr()) };
+
+        if attr == c::INVALID_FILE_ATTRIBUTES {
+            return match_kind(io::Error::last_os_error());
+        } else {
+            // can't open a directory on 9x/ME anyways
+            if attr & c::FILE_ATTRIBUTE_DIRECTORY != 0 {
+                return Ok(true);
+            }
+        }
+    }
+
+    match File::open(path, &opts) {
+        Err(e) => match_kind(e),
         // The file was opened successfully therefore it must exist,
         Ok(_) => Ok(true),
     }
