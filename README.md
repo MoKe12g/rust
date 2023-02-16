@@ -19,6 +19,42 @@ Read ["Installation"] from [The Book].
 ["Installation"]: https://doc.rust-lang.org/book/ch01-01-installation.html
 [The Book]: https://doc.rust-lang.org/book/index.html
 
+# rust9x
+
+## Build rust9x
+
+This guide was inspired by
+        https://github.com/rust9x/rust/wiki and https://github.com/MoKe12g/rust (https://github.com/rust-lang/rust/blob/7c13df853721b60a03e7c0bb084d2eb1e27a9caa/README.md)
+
+### Prequisites
+- Windows 10
+- Visual Studio 2022
+        - `C++ build tools`
+        - `Windows XP Support (VS2017)`
+- installed rust and cargo through rustup
+
+### Build Instructions
+- run the latest MSYS2 installer (from https://www.msys2.org/)
+- open cmd.exe
+- navigate to `C:\msys`
+- open with `msys2_shell.cmd -mingw32` (WICHTIG!)
+- in the shell popping up, run the folowing commands
+    - `pacman -Sy pacman-mirrors`
+    - `pacman -S git make diffutils tar mingw-w64-x86_64-python mingw-w64-x86_64-cmake mingw-w64-x86_64-gcc mingw-w64-x86_64-ninja  mingw-w64-i686-python mingw-w64-i686-cmake mingw-w64-i686-gcc mingw-w64-i686-ninja python git cmake`
+    - `git clone https://github.com/MoKe12g/rust.git`
+    - `cd rust`
+    - `cp config.rust9x.toml config.toml`
+    - `./x.py build`
+    - `rustup toolchain link rust9x C:\msys64\home\User\rust\build\x86_64-pc-windows-msvc\stage1`
+
+### Test the builded toolchain
+- install git for Windows
+- `git clone https://github.com/rust9x/rust9x-sample.git`
+- change `r9x_editbin` variable in justfile to `'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\[14.34.31933]\bin\Hostx64\x64\editbin.exe'` (change the content of the brackets according to your setup)
+- `just build`
+
+----
+
 ## Installing from Source
 
 The Rust build system uses a Python script called `x.py` to build the compiler,
