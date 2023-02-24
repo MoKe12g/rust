@@ -49,6 +49,7 @@ This guide was inspired by
 
 ### Test the builded toolchain
 - install git for Windows
+- 
 - `git clone https://github.com/rust9x/rust9x-sample.git`
 - change `r9x_editbin` variable in justfile to `'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\[14.34.31933]\bin\Hostx64\x64\editbin.exe'` (change the content of the brackets according to your setup)
 - `just build`
